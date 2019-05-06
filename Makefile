@@ -32,7 +32,7 @@ all: .common.all .ndb.shlib $(DIST)/__ndbserver
 	@:
 
 clean: .common.clean
-	rm -f $(CURDIR)/ugorji/ndb/*.o
+	rm -f $(CURDIR)/ugorji/ndb/*.o $(DIST)/ndbserver.o $(DIST)/libndb.a $(DIST)/__ndbserver
 
 .ndb.shlib: $(DIST)/libndb.a
 
