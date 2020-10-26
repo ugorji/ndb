@@ -31,18 +31,7 @@ The easiest way to grab the dependencies is to install the libraries
 packaged and provided by your OS maintainers e.g. ubuntu.
 
 ```sh
-sudo apt-get install libgflags-dev 
-sudo apt-get install libsnappy-dev
-sudo apt-get install zlib1g-dev
-sudo apt-get install libbz2-dev
-sudo apt-get install liblz4-dev
-sudo apt-get install libzstd-dev
-sudo apt-get install librocksdb-dev
-sudo apt-get install libgoogle-glog-dev
-sudo apt-get install libcbor-dev
-sudo apt-get install libmsgpack-dev
-sudo apt-get install libleveldb-dev
-sudo apt-get install libgtest-dev
+sudo apt-get install libgflags-dev librocksdb-dev libzstd-dev libgtest-dev libgoogle-glog-dev
 ```
 
 Note that `libgtest-dev` on ubuntu only install sources, so you have 
@@ -108,19 +97,21 @@ make USE_RTTI=1 static_lib
 make ROCKSDBLIBDIR=.../rocks/db/dir all
 ```
 
-OR edit the /usr/include/rocksdb/env.h as seen below
-https://github.com/facebook/rocksdb/pull/5208 
+OR 
 
+use the librocksdb-dev sharedlib but modify the `/usr/include/rocksdb/env.h`, 
+find the `class Logger` declaration,
+and ensure that all public functions have =0 on their declaration,
+so that we can build against the shared lib which is built without RTTI.
+
+FOr example, I mnade the changes below:
 ```
-800c800
-<   virtual ~Logger();
----
->   virtual ~Logger() {}
-818c818
-<   virtual void Logv(const InfoLogLevel log_level, const char* format, va_list ap);
----
->   virtual void Logv(const InfoLogLevel log_level, const char* format, va_list ap) = 0;
+  virtual ~Logger() = 0;
+  virtual Status Close() = 0;
+  virtual void Logv(const InfoLogLevel log_level, const char* format, va_list ap) = 0;
 ```
+
+See https://github.com/facebook/rocksdb/pull/5208 
 
 # Running
 

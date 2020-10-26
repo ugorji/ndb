@@ -28,11 +28,15 @@ public:
         prefix_("<leveldb:" + name + "> ") {}
     LeveldbLogger() : LeveldbLogger("ndb") {}
     ~LeveldbLogger() {} //TODO: should we do more?
-    using Logger::Logv;
-    void Logv(const leveldb::InfoLogLevel log_level, const char* format, va_list ap) override;
-    void Logv(const char* format, va_list ap) {
+    using leveldb::Logger::Close;
+    leveldb::Status Close() override {
+        return leveldb::Status::NotSupported("explicit close is unsupported by custom leveldb logger");
+    }
+    using leveldb::Logger::Logv;
+    void Logv(const char* format, va_list ap) override {
         Logv(GetInfoLogLevel(), format, ap);
     }
+    void Logv(const leveldb::InfoLogLevel log_level, const char* format, va_list ap) override;
 };
 
 class Manager {
@@ -74,7 +78,7 @@ void extractKeyParts(const uint8_t* ikey,
                      uint8_t* shapeid
 );
 
-}
+};
 }
 
 #endif //_incl_ugorji_ndb_manager_

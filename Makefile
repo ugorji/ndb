@@ -7,7 +7,8 @@ DIST = $(CURDIR)
 CFLAGS = -std=c99 -w
 CXXFLAGS = -std=c++11 -w
 CPPFLAGS = -fPIC -I$(CURDIR) -I$(COMMON) -g
-LDFLAGS = -lpthread -lglog -lsnappy -lbz2 -lz -L$(ROCKSDBLIBDIR) -lrocksdb -g
+# LDFLAGS = -lpthread -lglog -lsnappy -lbz2 -lz -L$(ROCKSDBLIBDIR) -lrocksdb -g
+LDFLAGS = -lpthread -lglog -lzstd -L$(ROCKSDBLIBDIR) -lrocksdb -g
 
 ndbObjFiles = \
 	$(SRC)/ugorji/ndb/manager.o \
