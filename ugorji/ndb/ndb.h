@@ -3,7 +3,7 @@
 
 #define NDB_DEBUG 0
 
-#include <cstdint>
+#include <stdint.h>
 #include <ugorji/util/lockset.h>
 #include <rocksdb/db.h>
 

@@ -31,29 +31,6 @@ std::atomic<size_t> SEQ;
 
 const bool GET_VIA_ITER = false; // Iteration doesn't support bloom filter optimization
 
-struct StreamError {
-    std::string S;
-};
-
-std::string errnoStr(std::string prefix = "", std::string suffix = "") {
-    char errbuf[32];
-    // char* errbuf2 = strerror_r(errno, errbuf, 32);
-    // return prefix + "(" + std::to_string(errno) + ") " + errbuf2 + suffix;
-    strerror_r(errno, errbuf, 32);
-    return prefix + "(" + std::to_string(errno) + ") " + errbuf + suffix;
-}
-
-void errnoChk(int i, std::string prefix = "", std::string suffix = "") {
-    if(i < 0) throw StreamError{ errnoStr(prefix, suffix) };
-}
-
-std::string streamErrText(std::string cat, uint8_t expecting, uint8_t received) {
-    char errbuf[64];
-    snprintf(errbuf, 64, "Invalid tag for %s: Expect 0x%x, Got: 0x%x", 
-             cat.c_str(), expecting, received);
-    return std::string(errbuf);
-}
-
 bool to_codec_value(std::string* serr, codec_value& out1) {
     if(serr != nullptr) {
         out1.type = CODEC_VALUE_STRING;
@@ -291,8 +268,6 @@ void ReqHandler::handle(slice_bytes in, slice_bytes& out, char** err) {
     encoder(&cvOut, &out, err);
     if(*err != nullptr) return;        
 }
-
-ReqHandler::~ReqHandler() {}
 
 } //close namespace ndb
 } // close namespace ugorji

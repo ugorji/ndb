@@ -23,7 +23,7 @@ public:
 class LeveldbLogger : public leveldb::Logger {
     std::string prefix_;
 public:
-    LeveldbLogger(std::string name) :
+    LeveldbLogger(const std::string& name) :
         leveldb::Logger(leveldb::InfoLogLevel::INFO_LEVEL),
         prefix_("<leveldb:" + name + "> ") {}
     LeveldbLogger() : LeveldbLogger("ndb") {}
@@ -53,7 +53,7 @@ private:
     std::unordered_map<uint8_t, Ndb*> indexDbs_ ;
     std::unordered_map<uint16_t, Ndb*> shardDbs_ ;
     std::unordered_map<uint16_t, std::unordered_map<uint8_t, Ndb*>*> perkindDbs_ ;
-    Ndb* openDb(std::string dbdir, leveldb::Options& opt, std::string* err);
+    Ndb* openDb(const std::string& dbdir, leveldb::Options& opt, std::string* err);
     Ndb* shardDb(uint16_t shard, std::string* err);
     Ndb* perkindDb(uint16_t shard, uint8_t kind, std::string* err);
 public:

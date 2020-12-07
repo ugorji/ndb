@@ -55,12 +55,14 @@ void trim(std::string& s1, bool left = true, bool right = true) {
     }
 }
 
-std::string trim2(std::string s1, bool left = true, bool right = true) {
-    trim(s1, left, right);
-    return s1;
+std::string trim2(const std::string& s1, size_t pos, size_t count = std::string::npos,
+                   bool left = true, bool right = true) {
+    auto s2 = s1.substr(pos, count);
+    trim(s2, left, right);
+    return s2;
 }
 
-void ensureDir(std::string s, std::string* err) {
+void ensureDir(const std::string& s, std::string* err) {
     struct stat st;
     if(::stat(s.c_str(), &st) == 0) {
         if(!S_ISDIR(st.st_mode)) *err = "Error: Not a directory";
@@ -102,9 +104,10 @@ Manager::~Manager() {
     for(auto iter = indexDbs_.begin(); iter != indexDbs_.end(); iter++) delete iter->second;
     for(auto iter = shardDbs_.begin(); iter != shardDbs_.end(); iter++) delete iter->second;
     for(auto iter = perkindDbs_.begin(); iter != perkindDbs_.end(); ) {
-        for(auto iter2 = iter->second->begin(); iter2 != iter->second->end(); iter2++) delete iter2->second;
-        //have to do the erase/incr here, not in for loop definition (else iter is destroyed on erase)
-        perkindDbs_.erase(iter++);
+        auto v = iter->second;
+        for(auto iter2 = v->begin(); iter2 != v->end(); iter2++) delete iter2->second;
+        iter = perkindDbs_.erase(iter);
+        delete v;
     }
 }
 
@@ -137,7 +140,7 @@ Ndb* Manager::ndbForKey(leveldb::Slice& key, std::string* err) {
 //     sw.writeLong((uint8_t*)a);
 // }
 
-Ndb* Manager::openDb(std::string dbdir, leveldb::Options& opt, std::string* err) {
+Ndb* Manager::openDb(const std::string& dbdir, leveldb::Options& opt, std::string* err) {
     LOG(INFO, "Opening DB: %s ...", dbdir.c_str());
     
     ugorji::util::LockSetLock lsl;
@@ -245,11 +248,12 @@ Ndb* Manager::perkindDb(uint16_t shard, uint8_t kind, std::string* err) {
 
 // see doc.md for file format.
 void Manager::load(std::istream& fs) {
-    for(std::string line; std::getline(fs, line); ) {
+    std::string line("");
+    for(; std::getline(fs, line); ) {
         int n = line.find('=', 0);
         if(n == -1) continue;
-        auto s0 = trim2(line.substr(0, n));
-        auto s1 = trim2(line.substr(n+1));
+        auto s0 = trim2(line, 0, n);
+        auto s1 = trim2(line, n+1);
         if(s0 == "basedir") {
             basedir_ = s1;
         } else {
@@ -263,7 +267,7 @@ void Manager::load(std::istream& fs) {
                 ss.push_back(s3);
             } else {
                 for(int n0 = 0; n != std::string::npos; n = s3.find(',', n0)) {
-                    ss.push_back(trim2(s3.substr(n0, n-n0)));
+                    ss.push_back(trim2(s3, n0, n-n0));
                     n0 = n+1;
                 }
             }
@@ -278,15 +282,15 @@ void Manager::load(std::istream& fs) {
                 opt.create_if_missing = 1;
                 int n0 = 0;
                 n = s1.find(',', 0);
-                opt.max_open_files = std::stoi(trim2(s1.substr(0, n)));
+                opt.max_open_files = std::stoi(trim2(s1, 0, n));
                 n0 = n+1;
                 n = s1.find(',', n0);
-                opt.write_buffer_size = std::stoi(trim2(s1.substr(n0, n-n0))) * (1 << 20); //MB
+                opt.write_buffer_size = std::stoi(trim2(s1, n0, n-n0)) * (1 << 20); //MB
                 n0 = n+1;
                 n = s1.find(',', n0);
-                // opt.block_size = std::stoi(trim2(s1.substr(n0, n-n0))) * (1 << 10); //KB
+                // opt.block_size = std::stoi(trim2(s1, n0, n-n0)) * (1 << 10); //KB
                 n0 = n+1;
-                auto blockCacheS = trim2(s1.substr(n0));
+                auto blockCacheS = trim2(s1, n0);
                 int blockCacheI = -1;
                 try { blockCacheI = std::stoi(blockCacheS); } catch(std::exception e) { }
                 

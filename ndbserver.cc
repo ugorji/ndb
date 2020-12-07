@@ -10,27 +10,11 @@
 #include <ugorji/ndb/conn.h>
 #include <ugorji/util/logging.h>
 
-ugorji::conn::Server* server_;
+ugorji::conn::Manager* connmgr_;
 
-void trapSignal(int sig) {
-    //We need to trap all signals we depend on, so their default is not called.
-    //We depend on SIGUSR1/SIGUSR2 for interrupting blocking calls (e.g. waits, etc),
-    //and on SIGTERM/SIGINT for graceful shutdown.
-    LOG(INFO, "NdbServer: Trapping signal: %d", sig);
-    switch(sig) {
-    case SIGUSR1:
-    case SIGUSR2:
-        //noop
-        break;
-    case SIGTERM:
-    case SIGINT:
-        if(server_ != nullptr) {
-            server_->stop();
-            server_ = nullptr;
-        }
-        //exit(1);
-    }
-}
+// // run Server in main thread, and don't create a new thread for the server.
+// // If set to false, we can test out signl handling well
+// const bool SERVER_IN_MAIN_THREAD = true;
 
 int main(int argc, char** argv) {
     //if(true) { return 0; }
@@ -38,8 +22,9 @@ int main(int argc, char** argv) {
     //setbuf(stderr, nullptr);
     ugorji::util::Log::getInstance().minLevel_ = ugorji::util::Log::TRACE;
     ugorji::ndb::Manager mgr;
+    int workers = -1;
     int port = 9999;
-    int numWorkers = 8;
+    int maxWorkers = -1;
     bool clearOnStartup = false;
     std::string initfile = "init.cfg";
     mgr.shardMin_ = 1;
@@ -51,7 +36,7 @@ int main(int argc, char** argv) {
         } else if(arg == "-i" || arg == "-initfile") {
             initfile = argv[++i];
         } else if(arg == "-w" || arg == "-workers") {
-            numWorkers = std::stoi(argv[++i]);
+            maxWorkers = std::stoi(argv[++i]);
         } else if(arg == "-k" || arg == "-perkind") {
             mgr.dbPerKind_ = memcmp("true", argv[++i], 4) == 0;
         } else if(arg == "-s" || arg == "-shards") {
@@ -76,40 +61,74 @@ int main(int argc, char** argv) {
         }
         mgr.load(fs);
     }
-    std::string err;
+
     if(clearOnStartup) {
         system(("rm -rf " + mgr.basedir_).c_str());
         system(("mkdir -p " + mgr.basedir_).c_str());
     }
-    LOG(INFO, "NdbServer: %d, BaseDir: %s, ClearOnStartup: %d, dbPerKind: %d", 
+    LOG(INFO, "<ndbserver> %d, BaseDir: %s, ClearOnStartup: %d, dbPerKind: %d", 
         port, mgr.basedir_.c_str(), clearOnStartup, mgr.dbPerKind_);
 
+    auto connmgr = new ugorji::conn::Manager(port, workers);
+    connmgr_ = connmgr;
+
     //always install signal handler in main thread, and before making other threads.
-    LOG(INFO, "NdbServer: Setup Signal Handler (SIGINT, SIGTERM, SIGUSR1, SIGUSR2)", 0);
-    struct sigaction sa;
-    sa.sa_handler = trapSignal;
-    sa.sa_flags = 0;
+    LOG(INFO, "<ndbserver> Setup Signal Handler (SIGINT, SIGTERM, SIGUSR1, SIGUSR2)", 0);
+    auto sighdlr = [](int sig) {
+                       LOG(INFO, "<simplehttpfileserver> receiving signal: %d", sig);
+                       if(connmgr_ != nullptr) {
+                           connmgr_->close();
+                           connmgr_ = nullptr;
+                       }
+                   };
+    auto sighdlr_noop = [](int sig) {};
+    std::signal(SIGINT,  sighdlr); // ctrl-c
+    std::signal(SIGTERM, sighdlr); // kill <pid>
+    std::signal(SIGUSR1, sighdlr_noop); // used to interrupt epoll_wait
+    std::signal(SIGUSR2, sighdlr_noop); // used to interrupt epoll_wait
+
+    std::string err = "";
+    connmgr->open(&err);
+    if(err.size() > 0) {
+        LOG(ERROR, "%s", err.data());
+        return 1;
+    }
+
+    ugorji::ndb::ReqHandler reqHdlr(&mgr);
     
-    sigaction(SIGTERM, &sa, nullptr); // kill <pid>
-    sigaction(SIGINT,  &sa, nullptr);  // ctrl-c
-    sigaction(SIGUSR1, &sa, nullptr); 
-    sigaction(SIGUSR2, &sa, nullptr); 
+    std::vector<ugorji::ndb::ConnHandler*> hdlrs;
+    auto fn = [&]() mutable -> decltype(auto) {
+             auto hdlr = new ugorji::ndb::ConnHandler(&reqHdlr);
+             hdlrs.push_back(hdlr);
+             return *hdlr;
+         };
     
-    ugorji::ndb::ReqHandler reqHdlr(&mgr);  
-    auto fn = [&] (slice_bytes x1, slice_bytes& x2, char** x3) { reqHdlr.handle(x1, x2, x3); };
+    connmgr->run(fn, true);
+    connmgr->wait();
+    
+    int exitcode = (connmgr->hasServerErrors() ? 1 : 0);
+
+    // ugorji::ndb::ReqHandler reqHdlr(&mgr);
+    // auto fn = [&] (slice_bytes x1, slice_bytes& x2, char** x3) { reqHdlr.handle(x1, x2, x3); };
     // std::function<void (slice_bytes, slice_bytes&, char**)> fn = reqHdlr.handle;
-    ugorji::conn::Server server(port, numWorkers, SIGUSR1, fn);
-    server_ = &server;
+
+    // ugorji::ndb::ConnHandler hdlr(&reqHdlr);
+    // ugorji::conn::Handler& chdlr = hdlr;
+    // ugorji::conn::Server server(chdlr, port, maxWorkers);
+    // server_ = &server;
     
-    //Need to do all server work in different thread (from signal handling thread),
-    //else some signals handling, condition variables, etc just do not work (with no error).
-    //server.start(&err);
-    std::thread thr(&ugorji::conn::Server::start, &server, &err);
-    thr.join();
-    
-    int exitcode = (err.size() == 0) ? 0 : 1;
-    //std::cerr << err << std::endl;
-    if(err.size() > 0) LOG(ERROR, "%s", err.c_str());
+    // //Need to do all server work in different thread (from signal handling thread),
+    // //else some signals handling, condition variables, etc just do not work (with no error).
+    // std::string err = "";
+    // if(SERVER_IN_MAIN_THREAD) {
+    //     server_->start(&err);
+    // } else {
+    //     std::thread thr(&ugorji::conn::Server::start, server_, &err);
+    //     thr.join();
+    // }
+    // int exitcode = (err.size() == 0) ? 0 : 1;
+    // //std::cerr << err << std::endl;
+    // if(err.size() > 0) LOG(ERROR, "%s", err.c_str());
     
     LOG(INFO, "<main>: shutdown completed", 0);
     return exitcode;

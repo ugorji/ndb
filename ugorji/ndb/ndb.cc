@@ -37,7 +37,7 @@ namespace ndb {
 // 
 // Things I learned:
 //   - Always initialize structs. Else you may get garbage.
-//     If need be, initialize them to nullptr explicitly (else U'd waste 5 hours chasing shit).
+//     If need be, initialize them to nullptr explicitly (else U'd waste 5 hours debugging aimlessly).
 //   - No need to call status() everytime just before calling Valid().
 //     Calling Valid() is sufficient. 
 // 

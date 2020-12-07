@@ -1,64 +1,42 @@
 COMMON = $(CURDIR)/../cc-common
 ROCKSDBLIBDIR = $(CURDIR)
 
-SRC = $(CURDIR)
-DIST = $(CURDIR)
+include $(COMMON)/Makefile.include.mk
 
-CFLAGS = -std=c99 -w
-CXXFLAGS = -std=c++11 -w
-CPPFLAGS = -fPIC -I$(CURDIR) -I$(COMMON) -g
 # LDFLAGS = -lpthread -lglog -lsnappy -lbz2 -lz -L$(ROCKSDBLIBDIR) -lrocksdb -g
 LDFLAGS = -lpthread -lglog -lzstd -L$(ROCKSDBLIBDIR) -lrocksdb -g
 
 ndbObjFiles = \
 	$(SRC)/ugorji/ndb/manager.o \
 	$(SRC)/ugorji/ndb/conn.o \
+	$(SRC)/ugorji/ndb/handler.o \
 	$(SRC)/ugorji/ndb/ndb.o \
-	$(SRC)/ugorji/ndb/c.o \
+	$(SRC)/ugorji/ndb/ndb-c.o \
 
-commonObjFiles = \
-	$(COMMON)/ugorji/util/lockset.o \
-	$(COMMON)/ugorji/util/logging.o \
-	$(COMMON)/ugorji/util/bigendian.o \
-	$(COMMON)/ugorji/util/slice.o \
-	$(COMMON)/ugorji/util/bufio.o \
-	$(COMMON)/ugorji/codec/codec.o \
-	$(COMMON)/ugorji/codec/simplecodec.o \
-	$(COMMON)/ugorji/codec/binc.o \
-	$(COMMON)/ugorji/conn/conn.o \
+all: .common.all .shlib $(DIST)/__ndbserver
 
-.PHONY: clean all
-
-all: .common.all .ndb.shlib $(DIST)/__ndbserver
-	@:
-
-clean: .common.clean
+clean:
 	rm -f $(CURDIR)/ugorji/ndb/*.o $(DIST)/ndbserver.o $(DIST)/libndb.a $(DIST)/__ndbserver
 
-.ndb.shlib: $(DIST)/libndb.a
+.shlib: $(DIST)/libndb.a $(DIST)/libndb.so
 
-$(DIST)/libndb.so: $(DIST) $(ndbObjFiles)
+$(DIST)/libndb.so: $(ndbObjFiles) | $(DIST)
 	$(CXX) -shared -fPIC -o $(DIST)/libndb.so $(ndbObjFiles) $(commonObjFiles) $(LDFLAGS)
 
-$(DIST)/libndb.a: $(DIST) $(ndbObjFiles)
+$(DIST)/libndb.a: $(ndbObjFiles) | $(DIST)
 	$(AR) rcs $(DIST)/libndb.a $(ndbObjFiles) $(commonObjFiles)
 
 $(DIST)/__ndbserver: $(DIST)/ndbserver.o $(DIST)/libndb.a
 	$(CXX) -o $(DIST)/__ndbserver $(DIST)/ndbserver.o $(DIST)/libndb.a $(LDFLAGS)
 
-.DEFAULT:
-	:
-
 server:
-	ulimit -c unlimited
-	$(DIST)/__ndbserver -p 9999 -s 1 16 -w `nproc` -x true -k false init.cfg
+	ulimit -c unlimited && \
+	$(DIST)/__ndbserver -p 9999 -s 1 16 -w -1 -x true -k false init.cfg
 
-.common.all:
-	@$(MAKE) -C $(COMMON) all
-
-.common.clean:
-	@$(MAKE) -C $(COMMON) clean
-
+server.valgrind:
+	ulimit -c unlimited && \
+	valgrind -s --track-origins=yes --leak-check=full \
+	$(DIST)/__ndbserver -p 9999 -s 1 16 -w -1 -x true -k false init.cfg
 
 # This creates ndbserver that expects to load libndb at runtime
 # $(DIST)/ndbserver: $(DIST)/ndbserver.o $(DIST)/libndb.so
@@ -85,3 +63,5 @@ server:
 # - search LIBRARY_PATH
 # Also, if a directory has both dynamic/shared (.so) and static libraries (.a), the static library is used.
 
+# If you don't want to see any output if nothing to be done,
+# make the recipe: @:
