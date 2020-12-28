@@ -39,12 +39,15 @@ void LeveldbLogger::Logv(const leveldb::InfoLogLevel log_level, const char* form
     case leveldb::InfoLogLevel::WARN_LEVEL:  lv = ugorji::util::Log::WARNING; break;
     case leveldb::InfoLogLevel::ERROR_LEVEL: lv = ugorji::util::Log::ERROR; break;
     case leveldb::InfoLogLevel::FATAL_LEVEL: lv = ugorji::util::Log::SEVERE; break;
+    case leveldb::InfoLogLevel::HEADER_LEVEL:
+    case leveldb::InfoLogLevel::NUM_INFO_LOG_LEVELS:
+        break;
     }
     ugorji::util::Log::getInstance().Logv(lv, __FILE__, __LINE__, s.c_str(), ap);
 }
 
 void trim(std::string& s1, bool left = true, bool right = true) {
-    int n;
+    size_t n;
     if(right) {
         n = s1.find_last_not_of(" \n\r\t");
         if(n != std::string::npos) s1.erase(n+1);
@@ -62,13 +65,13 @@ std::string trim2(const std::string& s1, size_t pos, size_t count = std::string:
     return s2;
 }
 
-void ensureDir(const std::string& s, std::string* err) {
+void ensureDir(const std::string& s, std::string& err) {
     struct stat st;
     if(::stat(s.c_str(), &st) == 0) {
-        if(!S_ISDIR(st.st_mode)) *err = "Error: Not a directory";
+        if(!S_ISDIR(st.st_mode)) err = "Error: Not a directory";
     } else {
         int i = ::mkdir(s.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-        if(i != 0) *err = "Error: Error making directory";
+        if(i != 0) err = "Error: Error making directory";
     }
 }
 
@@ -97,21 +100,7 @@ void extractKeyParts(const uint8_t* ikey,
     }
 }
 
-Manager::~Manager() {
-    // for(int i = 0; i < caches_.size(); i++) delete caches_[i];
-    // for(int i = 0; i < loggers_.size(); i++) delete loggers_[i];
-    
-    for(auto iter = indexDbs_.begin(); iter != indexDbs_.end(); iter++) delete iter->second;
-    for(auto iter = shardDbs_.begin(); iter != shardDbs_.end(); iter++) delete iter->second;
-    for(auto iter = perkindDbs_.begin(); iter != perkindDbs_.end(); ) {
-        auto v = iter->second;
-        for(auto iter2 = v->begin(); iter2 != v->end(); iter2++) delete iter2->second;
-        iter = perkindDbs_.erase(iter);
-        delete v;
-    }
-}
-
-Ndb* Manager::ndbForKey(leveldb::Slice& key, std::string* err) {
+Ndb* Manager::ndbForKey(leveldb::Slice& key, std::string& err) {
     uint16_t xshd;
     uint8_t xd, xi, xrk, xk, xshp;
     extractKeyParts((const uint8_t*)key.data(), key.size(), &xshd, &xd, &xi, &xrk, &xk, &xshp);
@@ -120,7 +109,7 @@ Ndb* Manager::ndbForKey(leveldb::Slice& key, std::string* err) {
     case D_IDGEN: 
     case D_ENTITY:
         if(xshd < shardMin_ || xshd >= (shardMin_ + shardRange_)) {
-            *err = "ndbForKey: Invalid shard: " + std::to_string(xshd);
+            err = "ndbForKey: Invalid shard: " + std::to_string(xshd);
             break;
         }
         db = dataDb(xshd, xrk, err);
@@ -129,7 +118,7 @@ Ndb* Manager::ndbForKey(leveldb::Slice& key, std::string* err) {
         db = indexDb(xi, err);
         break;
     default:
-        *err = "ndbForKey: Error: unidentified discrim: " + std::to_string(xd);
+        err = "ndbForKey: Error: unidentified discrim: " + std::to_string(xd);
     }
     return db;
 }
@@ -140,21 +129,23 @@ Ndb* Manager::ndbForKey(leveldb::Slice& key, std::string* err) {
 //     sw.writeLong((uint8_t*)a);
 // }
 
-Ndb* Manager::openDb(const std::string& dbdir, leveldb::Options& opt, std::string* err) {
+Ndb* Manager::openDb(const std::string& dbdir, leveldb::Options& opt, std::string& err) {
     LOG(INFO, "Opening DB: %s ...", dbdir.c_str());
     
     ugorji::util::LockSetLock lsl;
     auto vs = std::vector<std::string>{"db-dir:" + dbdir};
-    locks_.locksFor(vs, &lsl);
+    locks_.locksFor(vs, lsl);
     
     leveldb::DB* db = nullptr;
     leveldb::Status s = leveldb::DB::Open(opt, dbdir, &db);
     if(!s.ok() || db == nullptr) {
-        *err = s.ToString();
-        LOG(ERROR, "Error Opening DB: %s: err: %s", dbdir.c_str(), err->c_str());
+        err = s.ToString();
+        LOG(ERROR, "Error Opening DB: %s: err: %s", dbdir.c_str(), err.c_str());
         return nullptr;
     }
-    Ndb* l = new Ndb();
+    auto xx = std::make_unique<Ndb>();
+    Ndb* l = xx.get();
+    dbs_.push_back(std::move(xx));
     l->db_ = db;
     //l->wopt_.sync = 1;
     l->wopt_.sync = 0;
@@ -162,7 +153,7 @@ Ndb* Manager::openDb(const std::string& dbdir, leveldb::Options& opt, std::strin
     return l;
 }
   
-Ndb* Manager::indexDb(uint8_t index, std::string* err) {
+Ndb* Manager::indexDb(uint8_t index, std::string& err) {
     Ndb* n = nullptr;
     std::lock_guard<std::mutex> lock(mu_);
     auto dbiter = indexDbs_.find(index); 
@@ -185,12 +176,12 @@ Ndb* Manager::indexDb(uint8_t index, std::string* err) {
     return n;
 }
 
-Ndb* Manager::dataDb(uint16_t shard, uint8_t kind, std::string* err) {
+Ndb* Manager::dataDb(uint16_t shard, uint8_t kind, std::string& err) {
     if(dbPerKind_) return perkindDb(shard, kind, err);
     return shardDb(shard, err);
 }
 
-Ndb* Manager::shardDb(uint16_t shard, std::string* err) {
+Ndb* Manager::shardDb(uint16_t shard, std::string& err) {
     Ndb* n = nullptr;
     std::lock_guard<std::mutex> lock(mu_);
     auto dbiter = shardDbs_.find(shard); 
@@ -207,16 +198,18 @@ Ndb* Manager::shardDb(uint16_t shard, std::string* err) {
     return n;
 }
 
-Ndb* Manager::perkindDb(uint16_t shard, uint8_t kind, std::string* err) {
+Ndb* Manager::perkindDb(uint16_t shard, uint8_t kind, std::string& err) {
     std::lock_guard<std::mutex> lock(mu_);
     Ndb* n = nullptr;
-    auto dbiter = perkindDbs_.find(shard); 
     std::unordered_map<uint8_t, Ndb*>* m2 = nullptr;
+    auto dbiter = perkindDbs_.find(shard); 
     if(dbiter == perkindDbs_.end()) {
-        m2 = new std::unordered_map<uint8_t, Ndb*>;
-        perkindDbs_[shard] = m2;
+        auto xx = std::make_unique<std::unordered_map<uint8_t, Ndb*>>();
+        m2 = xx.get();
+        perkindDbs_.emplace(shard, std::move(xx));
+        // perkindDbs_.insert({shard, std::move(xx)});
     } else {
-        m2 = dbiter->second;
+        m2 = dbiter->second.get();
     }
     auto dbiter2 = m2->find(kind);
     if(dbiter2 == m2->end()) {
@@ -230,10 +223,10 @@ Ndb* Manager::perkindDb(uint16_t shard, uint8_t kind, std::string* err) {
         //make directory if not exist
         std::string dbdir = basedir_ + "/shard-" + std::to_string(shard);
         ensureDir(dbdir, err);
-        if(err->size() > 0) return nullptr;
+        if(err.size() > 0) return nullptr;
         dbdir = dbdir + "/root-kind-" + std::to_string(kind);
         ensureDir(dbdir, err);
-        if(err->size() > 0) return nullptr;
+        if(err.size() > 0) return nullptr;
         //printf(">>>>>> shard: %d, kind: %d, dbdir: %s\n", shard, kind, dbdir.c_str());
         n = openDb(dbdir, opt, err);
         if(n != nullptr) {
@@ -250,8 +243,8 @@ Ndb* Manager::perkindDb(uint16_t shard, uint8_t kind, std::string* err) {
 void Manager::load(std::istream& fs) {
     std::string line("");
     for(; std::getline(fs, line); ) {
-        int n = line.find('=', 0);
-        if(n == -1) continue;
+        size_t n = line.find('=', 0);
+        if(n == std::string::npos) continue;
         auto s0 = trim2(line, 0, n);
         auto s1 = trim2(line, n+1);
         if(s0 == "basedir") {
@@ -272,7 +265,7 @@ void Manager::load(std::istream& fs) {
                 }
             }
             if(s2 == "block_cache") {
-                for(int i = 0; i < ss.size(); i++) {
+                for(size_t i = 0; i < ss.size(); i++) {
                     auto c = leveldb::NewLRUCache(std::stoi(s1));
                     blockCache_[ss[i]] = c;
                     caches_.push_back(c);
@@ -291,10 +284,10 @@ void Manager::load(std::istream& fs) {
                 // opt.block_size = std::stoi(trim2(s1, n0, n-n0)) * (1 << 10); //KB
                 n0 = n+1;
                 auto blockCacheS = trim2(s1, n0);
-                int blockCacheI = -1;
-                try { blockCacheI = std::stoi(blockCacheS); } catch(std::exception e) { }
+                // int blockCacheI = -1;
+                // try { blockCacheI = std::stoi(blockCacheS); } catch(std::exception&) { }
                 
-                for(int i = 0; i < ss.size(); i++) {
+                for(size_t i = 0; i < ss.size(); i++) {
                     leveldb::Options opt2 = opt;
                     // // comment these out: rocksdb now uses different block_cache configuration
                     // // so no standard way to do this for leveldb and rocksdb
@@ -308,7 +301,7 @@ void Manager::load(std::istream& fs) {
                     opt2.info_log = l;
                     loggers_.push_back(l);
                     int k = -1;
-                    try { k = std::stoi(ss[i]); }  catch(std::exception e) { }
+                    try { k = std::stoi(ss[i]); } catch(std::exception&) { }
                     if(k != -1) {
                         auto& x = (s2 == "kind" ? kindOptions_ : indexOptions_);
                         x[k] = opt2;

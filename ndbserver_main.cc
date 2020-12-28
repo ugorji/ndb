@@ -12,7 +12,7 @@
 
 ugorji::conn::Manager* connmgr_;
 
-// // run Server in main thread, and don't create a new thread for the server.
+// // run Server in main thread, and don't create a thread for the server.
 // // If set to false, we can test out signl handling well
 // const bool SERVER_IN_MAIN_THREAD = true;
 
@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     ugorji::ndb::Manager mgr;
     int workers = -1;
     int port = 9999;
-    int maxWorkers = -1;
+    // int maxWorkers = -1;
     bool clearOnStartup = false;
     std::string initfile = "init.cfg";
     mgr.shardMin_ = 1;
@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
         } else if(arg == "-i" || arg == "-initfile") {
             initfile = argv[++i];
         } else if(arg == "-w" || arg == "-workers") {
-            maxWorkers = std::stoi(argv[++i]);
+            workers = std::stoi(argv[++i]);
         } else if(arg == "-k" || arg == "-perkind") {
             mgr.dbPerKind_ = memcmp("true", argv[++i], 4) == 0;
         } else if(arg == "-s" || arg == "-shards") {
@@ -69,8 +69,8 @@ int main(int argc, char** argv) {
     LOG(INFO, "<ndbserver> %d, BaseDir: %s, ClearOnStartup: %d, dbPerKind: %d", 
         port, mgr.basedir_.c_str(), clearOnStartup, mgr.dbPerKind_);
 
-    auto connmgr = new ugorji::conn::Manager(port, workers);
-    connmgr_ = connmgr;
+    auto connmgr = std::make_unique<ugorji::conn::Manager>(port, workers);
+    connmgr_ = connmgr.get();
 
     //always install signal handler in main thread, and before making other threads.
     LOG(INFO, "<ndbserver> Setup Signal Handler (SIGINT, SIGTERM, SIGUSR1, SIGUSR2)", 0);
@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
     std::signal(SIGUSR2, sighdlr_noop); // used to interrupt epoll_wait
 
     std::string err = "";
-    connmgr->open(&err);
+    connmgr->open(err);
     if(err.size() > 0) {
         LOG(ERROR, "%s", err.data());
         return 1;
@@ -96,12 +96,13 @@ int main(int argc, char** argv) {
 
     ugorji::ndb::ReqHandler reqHdlr(&mgr);
     
-    std::vector<ugorji::ndb::ConnHandler*> hdlrs;
+    std::vector<std::unique_ptr<ugorji::ndb::ConnHandler>> hdlrs;
     auto fn = [&]() mutable -> decltype(auto) {
-             auto hdlr = new ugorji::ndb::ConnHandler(&reqHdlr);
-             hdlrs.push_back(hdlr);
-             return *hdlr;
-         };
+                  auto hh = std::make_unique<ugorji::ndb::ConnHandler>(&reqHdlr);
+                  auto hdlr = hh.get();
+                  hdlrs.push_back(std::move(hh));
+                  return *hdlr;
+              };
     
     connmgr->run(fn, true);
     connmgr->wait();

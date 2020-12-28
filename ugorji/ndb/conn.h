@@ -1,5 +1,4 @@
-#ifndef _incl_ugorji_ndb_conn_
-#define _incl_ugorji_ndb_conn_
+#pragma once
 
 #include <ugorji/conn/conn.h>
 
@@ -14,10 +13,10 @@ public:
     slice_bytes in_;
     slice_bytes out_;
     int fd_;
-    int reqlen_;
-    int cursor_;
+    size_t reqlen_;
+    size_t cursor_;
     ugorji::conn::ConnState state_;
-    connFdStateMach(int fd) : fd_(fd) { reinit(); };
+    explicit connFdStateMach(int fd) : fd_(fd) { reinit(); };
     ~connFdStateMach() {};
     void reinit() {
         in_.bytes.len = 0;
@@ -41,33 +40,30 @@ private:
     Manager* mgr_;
 public:
     void handle(slice_bytes in, slice_bytes& out, char** err);
-    ReqHandler(Manager* n) : mgr_(n) { }
+    explicit ReqHandler(Manager* n) : mgr_(n) { }
     ~ReqHandler() { }
 };
 
 class ConnHandler : public ugorji::conn::Handler {
 private:
     ReqHandler* reqHdlr_;
-    char errbuf_[128];
+    char errbuf_[128] {};
     std::mutex mu_;
-    std::unordered_map<int,connFdStateMach*> clientfds_;
-    void stateFor(int fd, connFdStateMach** x);
-    void doStartFd(connFdStateMach* x, std::string* err);
-    void doReadFd(connFdStateMach* x, std::string* err);
-    void doProcessFd(connFdStateMach* x, std::string* err);
-    void doWriteFd(connFdStateMach* x, std::string* err);
+    std::unordered_map<int,std::unique_ptr<connFdStateMach>> clientfds_;
+    connFdStateMach& stateFor(int fd);
+    void doStartFd(connFdStateMach& x, std::string& err);
+    void doReadFd(connFdStateMach& x, std::string& err);
+    void doProcessFd(connFdStateMach& x, std::string& err);
+    void doWriteFd(connFdStateMach& x, std::string& err);
     // void stopFds();
-    void acceptFd(int fd, std::string* err);
+    void acceptFd(int fd, std::string& err);
 public:
-    ConnHandler(ReqHandler* reqHdlr) : ugorji::conn::Handler(), reqHdlr_(reqHdlr) {}
-    ~ConnHandler() {
-        for(auto it = clientfds_.begin(); it != clientfds_.end(); it++) delete it->second;
-    } 
-    virtual void handleFd(int fd, std::string* err) override;
-    virtual void unregisterFd(int fd, std::string* err) override;
+    explicit ConnHandler(ReqHandler* reqHdlr) : ugorji::conn::Handler(), reqHdlr_(reqHdlr) {}
+    ~ConnHandler() {} 
+    void handleFd(int fd, std::string& err) override;
+    void unregisterFd(int fd, std::string& err) override;
 };
 
 }
 }
 
-#endif //_incl_ugorji_ndb_conn_

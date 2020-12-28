@@ -97,7 +97,7 @@ void ndb_once_init() {
 }
 
 void ndb_trigger_crash() {
-    leveldb::Env* env2; 
+    leveldb::Env* env2(nullptr); 
     env2->SetBackgroundThreads(1, rocksdb::Env::LOW); // trigger crash
 }
 
@@ -122,15 +122,15 @@ std::string ndb_to_hex(const char* input, size_t len) {
 
 void ndb_release(uint32_t* reqkeys, size_t num) {
     std::lock_guard<std::mutex> lk(ndbc::mu);
-    for(int i = 0; i < num; i++) ndbc::mfree.erase(reqkeys[i]);
+    for(size_t i = 0; i < num; i++) ndbc::mfree.erase(reqkeys[i]);
 }
 
 // Note: this does a std::move of the string, so it's not copied, 
 // and we maintain ref to backing array.
-bool ndb_str_to_slice(std::string* src, slice_bytes_t* dest, ndbc::freeinfo* rkv) {
-    if(src == nullptr || src->length() == 0) return false;
-    *dest = slice_bytes_t{(char*)src->data(), src->length()};
-    rkv->strings_.push_back(std::move(*src));
+bool ndb_str_to_slice(std::string& src, slice_bytes_t* dest, ndbc::freeinfo* rkv) {
+    if(src.empty()) return false;
+    *dest = slice_bytes_t{(char*)src.data(), src.length()};
+    rkv->strings_.push_back(std::move(src));
     return true;
 }
 
@@ -172,7 +172,7 @@ uint32_t ndb_get_multi(ndb_t* db,
                    slice_bytes_t** errs) {
     auto rk = ++ndbc::seq;
     std::vector<leveldb::Slice> vkeys;
-    for(int i = 0; i < numKeys; i++) {
+    for(size_t i = 0; i < numKeys; i++) {
         vkeys.push_back(leveldb::Slice(keys[i].v, keys[i].len));
     }
     std::vector<std::string> verrs;
@@ -181,7 +181,7 @@ uint32_t ndb_get_multi(ndb_t* db,
     auto errs2 = new slice_bytes_t[numKeys];
     auto vals2 = new slice_bytes_t[numKeys];
     
-    for(int i = 0; i < numKeys; i++) {
+    for(size_t i = 0; i < numKeys; i++) {
         errs2[i] = slice_bytes_t{ (char*)verrs[i].data(), verrs[i].length() };
         vals2[i] = slice_bytes_t{ (char*)vvals[i].data(), vvals[i].length() };
     }
@@ -189,7 +189,7 @@ uint32_t ndb_get_multi(ndb_t* db,
     *vals = vals2;
     auto rkv = new ndbc::freeinfo;
     rkv->strings_.reserve((numKeys*2)+4);
-    for(int i = 0; i < numKeys; i++) {
+    for(size_t i = 0; i < numKeys; i++) {
         rkv->strings_.push_back(std::move(verrs[i]));
         rkv->strings_.push_back(std::move(vvals[i]));
     }
@@ -208,8 +208,8 @@ uint32_t ndb_get(ndb_t* db,
              slice_bytes_t* err) {
     auto rk = ++ndbc::seq;
     auto rkv = new ndbc::freeinfo;
-    std::string* sval = nullptr;
-    std::string* serr = nullptr;
+    std::string sval = nullptr;
+    std::string serr;
     db->rep->get(leveldb::Slice(key.v, key.len), sval, serr);
     ndb_str_to_slice(serr, err, rkv);
     ndb_str_to_slice(sval, val, rkv);
@@ -225,17 +225,17 @@ uint32_t ndb_update(ndb_t* db,
     auto rk = ++ndbc::seq;
     auto rkv = new ndbc::freeinfo;
     std::vector<leveldb::Slice> putkeys, putvalues, delkeys;
-    for(int i = 0; i < numPutKvs; ) {
+    for(size_t i = 0; i < numPutKvs; ) {
         slice_bytes_t sl = putKvs[i++];
         putkeys.push_back(leveldb::Slice(sl.v, sl.len));
         sl = putKvs[i++];
         putvalues.push_back(leveldb::Slice(sl.v, sl.len));
     }
-    for(int i = 0; i < numDels; i++) {
+    for(size_t i = 0; i < numDels; i++) {
         slice_bytes_t sl = dels[i];
         delkeys.push_back(leveldb::Slice(sl.v, sl.len));
     }
-    std::string* serr = nullptr;
+    std::string serr;
     db->rep->update(putkeys, putvalues, delkeys, serr);
     ndb_str_to_slice(serr, err, rkv);
     std::lock_guard<std::mutex> lk(ndbc::mu);
@@ -268,7 +268,7 @@ uint32_t ndb_query(ndb_t* db,
                                 << ", res: " << ndb_to_hex(slarr, sl.size()) << std::endl;
         rkv->arrBytes_.push_back(std::unique_ptr<char[]>(slarr));
     };
-    std::string* serr = nullptr;
+    std::string serr;
     db->rep->query(leveldb::Slice(seekpos1.v, seekpos1.len), 
                    leveldb::Slice(seekpos2.v, seekpos2.len), 
                    kindid, shapeid, ancestorOnly, withCursor, 
@@ -281,7 +281,7 @@ uint32_t ndb_query(ndb_t* db,
                                       << (void*)(*results) << std::endl;
         std::cerr << ">>>>> return: Query Res: sls.data(): " 
                   << (void*)sls.data() << std::endl;    
-        for(int i = 0; i < *numResults; i++) {
+        for(size_t i = 0; i < *numResults; i++) {
             std::cerr << ">>>>> return: Query Res: sls[" << i << "].v: " 
                       << (void*)sls[i].v << ", res: " 
                       << ndb_to_hex(sls[i].v, sls[i].len) << std::endl;
@@ -310,7 +310,7 @@ uint32_t ndb_incr_decr(ndb_t* db,
                    slice_bytes_t* err) {
     auto rk = ++ndbc::seq;
     auto rkv = new ndbc::freeinfo;
-    std::string* serr = nullptr;
+    std::string serr;
     db->rep->incrdecr(leveldb::Slice(key.v, key.len), incr, delta, initVal, nextVal, serr);
     ndb_str_to_slice(serr, err, rkv);
     std::lock_guard<std::mutex> lk(ndbc::mu);

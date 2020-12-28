@@ -1,5 +1,4 @@
-#ifndef _incl_ugorji_ndb_ndb_
-#define _incl_ugorji_ndb_ndb_
+#pragma once
 
 #define NDB_DEBUG 0
 
@@ -10,7 +9,7 @@
 namespace leveldb = rocksdb;
 
 namespace ugorji { 
-namespace ndb { 
+namespace ndb {
 
 const std::string BAD_ITERATOR_ERROR = "<BAD_ITERATOR>";
 const std::string NOT_FOUND_ERROR = "<App_Entity_Not_Found>"; //match ugorji.net/util.ErrEntityNotFoundMsg
@@ -31,18 +30,18 @@ public:
         std::vector<std::string>* errs);
     void get(
         leveldb::Slice key, 
-        std::string* value, std::string* err
+        std::string& value, std::string& err
     );
     void getViaIter(
         leveldb::Iterator* iter, 
         leveldb::Slice key, 
-        leveldb::Slice* value, std::string* err
+        leveldb::Slice* value, std::string& err
     );
     void update(
         std::vector<leveldb::Slice>& putkeys,
         std::vector<leveldb::Slice>& putvalues, 
         std::vector<leveldb::Slice>& delkeys,
-        std::string* err
+        std::string& err
     );
     void query(
         const leveldb::Slice seekpos1,
@@ -55,7 +54,7 @@ public:
         const size_t offset,
         const size_t limit,
         std::function<void (leveldb::Slice&)> iterFn,
-        std::string* err
+        std::string& err
     );
     void incrdecr(
         leveldb::Slice key,
@@ -63,14 +62,22 @@ public:
         uint16_t delta,
         uint16_t initVal,
         uint64_t* nextVal,
-        std::string* err
+        std::string& err
     );
     ~Ndb() {
+        // db_->CancelAllBackgroundWork(true);
         delete db_;
     }
 };
- 
+
+// iterGuard works to ensure the iterator, got from NewIterator, is deleted once out of scope
+class iterGuard {
+public:
+    leveldb::Iterator* iter_;
+    explicit iterGuard(leveldb::Iterator* iter) : iter_(iter) {}
+    ~iterGuard() { delete iter_; }
+};
+
 }
 }
 
-#endif //_incl_ugorji_ndb_ndb_

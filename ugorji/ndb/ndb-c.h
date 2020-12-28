@@ -1,5 +1,4 @@
-#ifndef _incl_ugorji_ndb_c_
-#define _incl_ugorji_ndb_c_
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,4 +87,3 @@ extern uint32_t ndb_incr_decr(ndb_t* db,
 #ifdef __cplusplus
 }  // end extern "C" 
 #endif
-#endif //_incl_ugorji_ndb_c_

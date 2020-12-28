@@ -6,41 +6,59 @@ include $(COMMON)/Makefile.include.mk
 # LDFLAGS = -lpthread -lglog -lsnappy -lbz2 -lz -L$(ROCKSDBLIBDIR) -lrocksdb -g
 LDFLAGS = -lpthread -lglog -lzstd -L$(ROCKSDBLIBDIR) -lrocksdb -g
 
-ndbObjFiles = \
-	$(SRC)/ugorji/ndb/manager.o \
-	$(SRC)/ugorji/ndb/conn.o \
-	$(SRC)/ugorji/ndb/handler.o \
-	$(SRC)/ugorji/ndb/ndb.o \
-	$(SRC)/ugorji/ndb/ndb-c.o \
+objFiles = \
+	$(BUILD)/ugorji/ndb/manager.o \
+	$(BUILD)/ugorji/ndb/conn.o \
+	$(BUILD)/ugorji/ndb/ndb.o \
+	$(BUILD)/ugorji/ndb/ndb-c.o \
+	$(BUILD)/ndbserver_main.o \
 
-all: .common.all .shlib $(DIST)/__ndbserver
+
+all: .common.all .shlib $(BUILD)/__ndbserver
 
 clean:
-	rm -f $(CURDIR)/ugorji/ndb/*.o $(DIST)/ndbserver.o $(DIST)/libndb.a $(DIST)/__ndbserver
+	rm -f $(BUILD)/*
 
-.shlib: $(DIST)/libndb.a $(DIST)/libndb.so
+.shlib: $(BUILD)/libndb.a $(BUILD)/libndb.so
 
-$(DIST)/libndb.so: $(ndbObjFiles) | $(DIST)
-	$(CXX) -shared -fPIC -o $(DIST)/libndb.so $(ndbObjFiles) $(commonObjFiles) $(LDFLAGS)
+$(BUILD)/libndb.so: $(objFiles) | $(BUILD)
+	mkdir -p $(BUILD) && \
+	$(CXX) -shared -fPIC -o $(BUILD)/libndb.so $(objFiles) $(commonObjFiles) $(LDFLAGS)
 
-$(DIST)/libndb.a: $(ndbObjFiles) | $(DIST)
-	$(AR) rcs $(DIST)/libndb.a $(ndbObjFiles) $(commonObjFiles)
+$(BUILD)/libndb.a: $(objFiles) | $(BUILD)
+	mkdir -p $(BUILD) && \
+	$(AR) rcs $(BUILD)/libndb.a $^ $(commonObjFiles)
 
-$(DIST)/__ndbserver: $(DIST)/ndbserver.o $(DIST)/libndb.a
-	$(CXX) -o $(DIST)/__ndbserver $(DIST)/ndbserver.o $(DIST)/libndb.a $(LDFLAGS)
+$(BUILD)/__ndbserver: $(BUILD)/libndb.a
+	$(CXX) -o $(BUILD)/__ndbserver $^ $(LDFLAGS)
 
 server:
 	ulimit -c unlimited && \
-	$(DIST)/__ndbserver -p 9999 -s 1 16 -w -1 -x true -k false init.cfg
+	$(BUILD)/__ndbserver -p 9999 -s 1 16 -w -1 -x true -k false init.cfg
+
+# To generate suppressions file, remove suppressions arg in server.valgrind below,
+# and then run:
+#
+#    f1=$(mktemp)
+#    make  server.valgrind 2>&1 | ~/.local/bin/parse-valgrind-suppressions.sh > $f1
+#
+# copy and paste from that file into valgrind.suppressions.txt,
+# and trim using ... appropriately
+#
+# Note: parse-valgrind-suppressions.sh came from:
+# - https://wiki.wxwidgets.org/Parse_valgrind_suppressions.sh
+# - https://wiki.wxwidgets.org/Valgrind_Suppression_File_Howto
 
 server.valgrind:
 	ulimit -c unlimited && \
 	valgrind -s --track-origins=yes --leak-check=full \
-	$(DIST)/__ndbserver -p 9999 -s 1 16 -w -1 -x true -k false init.cfg
+	--show-reachable=yes \
+	--gen-suppressions=all --suppressions=$(SRC)/valgrind.suppressions.txt \
+	$(BUILD)/__ndbserver -p 9999 -s 1 16 -w -1 -x true -k false init.cfg
 
 # This creates ndbserver that expects to load libndb at runtime
-# $(DIST)/ndbserver: $(DIST)/ndbserver.o $(DIST)/libndb.so
-# 	$(CXX) -o $(DIST)/ndbserver $(DIST)/ndbserver.o -L$(DIST) -lndb $(LDFLAGS)
+# $(BUILD)/ndbserver: $(BUILD)/libndb.so
+# 	$(CXX) -o $(BUILD)/ndbserver $(BUILD)/ndbserver_main.o -L$(BUILD) -lndb $(LDFLAGS)
 
 # This runs the server, using the dynamic library
 # server:
@@ -48,12 +66,12 @@ server.valgrind:
 # 	LD_LIBRARY_PATH=$(CURDIR)/ $(CURDIR)/ndbserver -p 9999 -s 1 16 -w `nproc` -x true -k false init.cfg
 
 # .clean: .util.lib.clean .codec.lib.clean .ndb.lib.clean .ndbserver.app.clean
-#	rm -f $(DIST)/libndb.so
-#	rm -f $(DIST)/my_gtest
+#	rm -f $(BUILD)/libndb.so
+#	rm -f $(BUILD)/my_gtest
 
 # distclean: .ndbserver.distclean
 # .%.distclean:
-# 	rm -rf $(DIST)/$*
+# 	rm -rf $(BUILD)/$*
 
 # test -f $(CURDIR)/core && mv $(CURDIR)/core $(CURDIR)/core__$(date '+%m%d%Y_%H%M%S').bak
 

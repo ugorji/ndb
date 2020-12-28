@@ -1,5 +1,4 @@
-#ifndef _incl_ugorji_ndb_manager_
-#define _incl_ugorji_ndb_manager_
+#pragma once
 
 #include "ndb.h"
 #include <rocksdb/env.h>
@@ -23,7 +22,7 @@ public:
 class LeveldbLogger : public leveldb::Logger {
     std::string prefix_;
 public:
-    LeveldbLogger(const std::string& name) :
+    explicit LeveldbLogger(const std::string& name) :
         leveldb::Logger(leveldb::InfoLogLevel::INFO_LEVEL),
         prefix_("<leveldb:" + name + "> ") {}
     LeveldbLogger() : LeveldbLogger("ndb") {}
@@ -52,20 +51,21 @@ private:
     std::vector<std::shared_ptr<leveldb::Logger>> loggers_ ;
     std::unordered_map<uint8_t, Ndb*> indexDbs_ ;
     std::unordered_map<uint16_t, Ndb*> shardDbs_ ;
-    std::unordered_map<uint16_t, std::unordered_map<uint8_t, Ndb*>*> perkindDbs_ ;
-    Ndb* openDb(const std::string& dbdir, leveldb::Options& opt, std::string* err);
-    Ndb* shardDb(uint16_t shard, std::string* err);
-    Ndb* perkindDb(uint16_t shard, uint8_t kind, std::string* err);
+    std::unordered_map<uint16_t, std::unique_ptr<std::unordered_map<uint8_t, Ndb*>>> perkindDbs_;
+    std::vector<std::unique_ptr<Ndb>> dbs_;
+    Ndb* openDb(const std::string& dbdir, leveldb::Options& opt, std::string& err);
+    Ndb* shardDb(uint16_t shard, std::string& err);
+    Ndb* perkindDb(uint16_t shard, uint8_t kind, std::string& err);
 public:
     bool dbPerKind_ ;
     uint16_t shardMin_ = 1;
     uint16_t shardRange_ = 1;
     std::string basedir_;
-    Ndb* dataDb(uint16_t shard, uint8_t kind, std::string* err);
-    Ndb* indexDb(uint8_t index, std::string* err);
+    Ndb* dataDb(uint16_t shard, uint8_t kind, std::string& err);
+    Ndb* indexDb(uint8_t index, std::string& err);
     void load(std::istream& initfs);
-    Ndb* ndbForKey(leveldb::Slice& key, std::string* err);
-    ~Manager();
+    Ndb* ndbForKey(leveldb::Slice& key, std::string& err);
+    ~Manager() {};
 };
 
 void extractKeyParts(const uint8_t* ikey, 
@@ -81,4 +81,3 @@ void extractKeyParts(const uint8_t* ikey,
 };
 }
 
-#endif //_incl_ugorji_ndb_manager_

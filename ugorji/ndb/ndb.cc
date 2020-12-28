@@ -44,13 +44,6 @@ namespace ndb {
 
 const leveldb::Comparator* COMPARATOR = leveldb::BytewiseComparator();
 
-class iterGuard {
-public:
-    leveldb::Iterator* iter_;
-    iterGuard(leveldb::Iterator* iter) : iter_(iter) {}
-    ~iterGuard() { delete iter_; }
-};
-
 leveldb::Slice ndbEntityBytesFromSlice(
     const uint8_t* ikey, 
     const size_t sz,
@@ -87,8 +80,8 @@ leveldb::Slice ndbEntityBytesFromSlice(
        
 void Ndb::gets(std::vector<leveldb::Slice>& keys, std::vector<std::string>* values, std::vector<std::string>* errs) {
     std::vector<leveldb::Status> ss = db_->MultiGet(ropt_, keys, values);
-    for(int i = 0; i < ss.size(); i++) {
-        std::string tmp;
+    for(size_t i = 0; i < ss.size(); i++) {
+        // std::string tmp;
         if(ss[i].ok()) {
             errs->push_back("");
         } else if(ss[i].IsNotFound()) {
@@ -99,31 +92,31 @@ void Ndb::gets(std::vector<leveldb::Slice>& keys, std::vector<std::string>* valu
     }
 }
 
-void Ndb::get(leveldb::Slice key, std::string* value, std::string* err) {
+void Ndb::get(leveldb::Slice key, std::string& value, std::string& err) {
     std::string tmp;
     leveldb::Status s = db_->Get(ropt_, key, &tmp);
     if(s.ok()) {
-        *value = std::move(tmp);
+        value = std::move(tmp);
     } else if(s.IsNotFound()) {
-        *err = NOT_FOUND_ERROR;
+        err = NOT_FOUND_ERROR;
     } else {
-        *err = std::move(s.ToString());
+        err = std::move(s.ToString());
     }
 }
 
 void Ndb::getViaIter(leveldb::Iterator* iter, leveldb::Slice key, 
-                     leveldb::Slice* value, std::string* err) {
+                     leveldb::Slice* value, std::string& err) {
     if(iter->status().ok()) {
         iter->Seek(key);
         if(!iter->status().ok()) {
-            *err = BAD_ITERATOR_ERROR;
+            err = BAD_ITERATOR_ERROR;
         } else if(iter->Valid() && COMPARATOR->Compare(key, iter->key()) == 0) {
             *value = iter->value();
         } else {
-            *err = NOT_FOUND_ERROR;
+            err = NOT_FOUND_ERROR;
         }
     } else {
-        *err = BAD_ITERATOR_ERROR;
+        err = BAD_ITERATOR_ERROR;
     }
 }
 
@@ -131,20 +124,20 @@ void Ndb::update(
     std::vector<leveldb::Slice>& putkeys,
     std::vector<leveldb::Slice>& putvalues, 
     std::vector<leveldb::Slice>& delkeys,
-    std::string* err
+    std::string& err
 ) {
-    int numputs = putkeys.size();
-    int numdels = delkeys.size();
+    auto numputs = putkeys.size();
+    auto numdels = delkeys.size();
     leveldb::WriteBatch wb;
-    for(int i = 0; i < numputs; i++) {
+    for(size_t i = 0; i < numputs; i++) {
         wb.Put(putkeys[i], putvalues[i]);
     }
-    for(int i = 0; i < numdels; i++) {
+    for(size_t i = 0; i < numdels; i++) {
         wb.Delete(delkeys[i]);
     }
     leveldb::Status s = db_->Write(wopt_, &wb);
     if(!s.ok()) {
-        *err = std::move(s.ToString());
+        err = std::move(s.ToString());
     }
 }
 
@@ -154,19 +147,19 @@ void Ndb::incrdecr(
     uint16_t delta,
     uint16_t initVal,
     uint64_t* nextVal,
-    std::string* err
+    std::string& err
 ) {
     //typedef unsigned long long int uint64;
     //lock the key (with unlock after this is done) (RAII)
     std::vector<std::string> skeys { std::string(key.data(), key.size()) };
     ugorji::util::LockSetLock ls;
-    locks_.locksFor(skeys, &ls);
+    locks_.locksFor(skeys, ls);
     uint64_t v(0);
     std::string t;
     leveldb::Status s = db_->Get(ropt_, key, &t);
     if(s.ok()) {
         if(t.size() != 8) {
-            *err = "Value for incr/decr must be 8-bytes. Got: " + 
+            err = "Value for incr/decr must be 8-bytes. Got: " + 
                 std::to_string(t.size()) + " bytes";
             return;
         }
@@ -175,7 +168,7 @@ void Ndb::incrdecr(
     } else if(s.IsNotFound()) {
         v = initVal;
     } else {
-        *err = std::move(s.ToString());
+        err = std::move(s.ToString());
         return;
     }
     if(incr) {
@@ -191,7 +184,7 @@ void Ndb::incrdecr(
     if(s.ok()) {
         *nextVal = v;
     } else {
-        *err = std::move(s.ToString());
+        err = std::move(s.ToString());
     }
 }
 
@@ -235,7 +228,7 @@ void Ndb::query(
     const size_t offset,
     const size_t limit,
     std::function<void (leveldb::Slice&)> iterFn,
-    std::string* err
+    std::string& err
 ) {
     uint8_t discrim = seekpos1[0] >> 4;
         
@@ -267,13 +260,13 @@ void Ndb::query(
             skipFirstMatch = true;
             break;
         default:
-            *err = "ndb/leveldb: Invalid last filter operator: [" + 
+            err = "ndb/leveldb: Invalid last filter operator: [" + 
                 std::to_string(char(lastFilterOp)) + "]";
             return;
         }
     }
     int numscans = 0;
-    int numResults = 0;
+    size_t numResults = 0;
     if(withCursor) {
         skipOne = false;
         skipFirstMatch = false;
@@ -281,7 +274,7 @@ void Ndb::query(
     leveldb::Status s;
     leveldb::Slice ikey;
     leveldb::Iterator* iter = db_->NewIterator(ropt_);
-    iterGuard iterg(iter); // delete iter at end
+    iterGuard iterg(iter);
     if(!iter->status().ok()) goto finish;
     iter->Seek(seekpos1);
     //if(!iter->status().ok()) goto finish;
@@ -312,7 +305,7 @@ void Ndb::query(
         }
     }
     if(offset > 0) {
-        for(int i = 0; i < offset; i++) {
+        for(size_t i = 0; i < offset; i++) {
             if(forward) iter->Next();
             else iter->Prev();
             //if(!iter->status().ok()) goto finish;
@@ -362,7 +355,7 @@ void Ndb::query(
  finish:
     LOG(TRACE, "In Query: #scans: %d, #results: %d", numscans, numResults);
     if(!iter->status().ok()) {
-        *err = std::move(iter->status().ToString());
+        err = std::move(iter->status().ToString());
     }
 }
 

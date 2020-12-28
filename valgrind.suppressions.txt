@@ -1,0 +1,25 @@
+{
+   5<insert_a_suppression_name_here>
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:_Znwm
+   ...
+   obj:/usr/lib/x86_64-linux-gnu/libgflags.so.2.2.2
+   fun:call_init.part.0
+   fun:call_init
+   fun:_dl_init
+   obj:/usr/lib/x86_64-linux-gnu/ld-2.32.so
+   ...
+}
+{
+   8<insert_a_suppression_name_here>
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:_Znwm
+   ...
+   fun:_ZN7rocksdb3Env7DefaultEv
+   fun:_ZN7rocksdb9DBOptionsC1Ev
+   fun:_ZN7rocksdb7OptionsC1Ev
+   fun:_ZN6ugorji3ndb7ManagerC1Ev
+   fun:main
+}
